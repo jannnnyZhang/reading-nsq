@@ -36,7 +36,9 @@ func (p *LookupProtocolV1) IOLoop(conn net.Conn) error {
 			break
 		}
 		fmt.Println(line)
+		//去空
 		line = strings.TrimSpace(line)
+		//解析参数
 		params := strings.Split(line, " ")
 
 		var response []byte
@@ -84,6 +86,7 @@ func (p *LookupProtocolV1) IOLoop(conn net.Conn) error {
 }
 
 func (p *LookupProtocolV1) Exec(client *ClientV1, reader *bufio.Reader, params []string) ([]byte, error) {
+	fmt.Println(params)
 	switch params[0] {
 	case "PING":
 		return p.PING(client, params)
@@ -194,7 +197,11 @@ func (p *LookupProtocolV1) UNREGISTER(client *ClientV1, reader *bufio.Reader, pa
 	return []byte("OK"), nil
 }
 
+//身份认证，在nsqd启动时，
+// 例如 go run main.go options.go -lookupd-tcp-address=127.0.0.1:4160
+// nsqd会向nsqlookupd发送IDENTIFY命令进行信息交换
 func (p *LookupProtocolV1) IDENTIFY(client *ClientV1, reader *bufio.Reader, params []string) ([]byte, error) {
+
 	var err error
 
 	if client.peerInfo != nil {
@@ -202,11 +209,14 @@ func (p *LookupProtocolV1) IDENTIFY(client *ClientV1, reader *bufio.Reader, para
 	}
 
 	var bodyLen int32
+	//获取body有多少字节
+	//Big Endian 是指低地址端 存放 高位字节 客户端把长度这个字段以Big Endian传了
 	err = binary.Read(reader, binary.BigEndian, &bodyLen)
+
 	if err != nil {
 		return nil, protocol.NewFatalClientErr(err, "E_BAD_BODY", "IDENTIFY failed to read body size")
 	}
-
+	//根据body字节数一次性读取
 	body := make([]byte, bodyLen)
 	_, err = io.ReadFull(reader, body)
 	if err != nil {
@@ -215,18 +225,32 @@ func (p *LookupProtocolV1) IDENTIFY(client *ClientV1, reader *bufio.Reader, para
 
 	// body is a json structure with producer information
 	peerInfo := PeerInfo{id: client.RemoteAddr().String()}
+	/**
+		body其实是一个JSON，于是乎解析到PeerInfo
+		结构体大概是存的信息
+		{
+			lastUpdate:0
+			id:127.0.0.1:53528
+			RemoteAddress:127.0.0.1:53528
+			Hostname:XXXX
+			BroadcastAddress:XXXXXX
+			TCPPort:4150
+			HTTPPort:4151
+			Version:1.2.1-alpha
+		}
+	 */
 	err = json.Unmarshal(body, &peerInfo)
 	if err != nil {
 		return nil, protocol.NewFatalClientErr(err, "E_BAD_BODY", "IDENTIFY failed to decode JSON body")
 	}
 
 	peerInfo.RemoteAddress = client.RemoteAddr().String()
-
 	// require all fields
 	if peerInfo.BroadcastAddress == "" || peerInfo.TCPPort == 0 || peerInfo.HTTPPort == 0 || peerInfo.Version == "" {
 		return nil, protocol.NewFatalClientErr(nil, "E_BAD_BODY", "IDENTIFY missing fields")
 	}
 
+	//这里会更新lastUpdate，不太懂这里为什么需要原子操作
 	atomic.StoreInt64(&peerInfo.lastUpdate, time.Now().UnixNano())
 
 	p.ctx.nsqlookupd.logf(LOG_INFO, "CLIENT(%s): IDENTIFY Address:%s TCP:%d HTTP:%d Version:%s",
@@ -238,6 +262,7 @@ func (p *LookupProtocolV1) IDENTIFY(client *ClientV1, reader *bufio.Reader, para
 	}
 
 	// build a response
+	//组装响应参数，最后以json返回
 	data := make(map[string]interface{})
 	data["tcp_port"] = p.ctx.nsqlookupd.RealTCPAddr().Port
 	data["http_port"] = p.ctx.nsqlookupd.RealHTTPAddr().Port

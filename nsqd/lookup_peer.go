@@ -91,18 +91,22 @@ func (lp *lookupPeer) Close() error {
 //
 // It returns the response from nsqlookupd as []byte
 func (lp *lookupPeer) Command(cmd *nsq.Command) ([]byte, error) {
+	//initialState 初始状态是stateDisconnected
 	initialState := lp.state
 	if lp.state != stateConnected {
+		//tcp拨号
 		err := lp.Connect()
 		if err != nil {
 			return nil, err
 		}
 		lp.state = stateConnected
+		//发送协议版本
 		_, err = lp.Write(nsq.MagicV1)
 		if err != nil {
 			lp.Close()
 			return nil, err
 		}
+		//这里第一次连接执行
 		if initialState == stateDisconnected {
 			lp.connectCallback(lp)
 		}

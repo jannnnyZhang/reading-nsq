@@ -14,18 +14,20 @@ import (
 
 func connectCallback(n *NSQD, hostname string) func(*lookupPeer) {
 	return func(lp *lookupPeer) {
+		//组装请求body
 		ci := make(map[string]interface{})
 		ci["version"] = version.Binary
 		ci["tcp_port"] = n.RealTCPAddr().Port
 		ci["http_port"] = n.RealHTTPAddr().Port
 		ci["hostname"] = hostname
 		ci["broadcast_address"] = n.getOpts().BroadcastAddress
-
+		//组装identify命令(身份认证)
 		cmd, err := nsq.Identify(ci)
 		if err != nil {
 			lp.Close()
 			return
 		}
+		//执行identify命令
 		resp, err := lp.Command(cmd)
 		if err != nil {
 			n.logf(LOG_ERROR, "LOOKUPD(%s): %s - %s", lp, cmd, err)
