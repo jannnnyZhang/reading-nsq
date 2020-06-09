@@ -62,6 +62,8 @@ func (l *NSQLookupd) Main() error {
 
 	exitCh := make(chan error)
 	var once sync.Once
+
+	//err处理函数
 	exitFunc := func(err error) {
 		once.Do(func() {
 			if err != nil {
@@ -70,12 +72,18 @@ func (l *NSQLookupd) Main() error {
 			exitCh <- err
 		})
 	}
-
+	//tcp服务
 	l.tcpServer = &tcpServer{ctx: ctx}
+
+	//Wrap会创建一个协程，
+	//创建的协程执行exitFunc(protocol.TCPServer(l.tcpListener, l.tcpServer, l.logf)),会阻塞，等到产生err则返回
+	//此时则执行 exitFunc(err) 会发送err至exitCh,下文的channel读取则取消堵塞
 	l.waitGroup.Wrap(func() {
 		exitFunc(protocol.TCPServer(l.tcpListener, l.tcpServer, l.logf))
 	})
+	//http服务
 	httpServer := newHTTPServer(ctx)
+
 	l.waitGroup.Wrap(func() {
 		exitFunc(http_api.Serve(l.httpListener, httpServer, "HTTP", l.logf))
 	})
@@ -93,16 +101,20 @@ func (l *NSQLookupd) RealHTTPAddr() *net.TCPAddr {
 }
 
 func (l *NSQLookupd) Exit() {
+	//关闭tcp监听
 	if l.tcpListener != nil {
 		l.tcpListener.Close()
 	}
 
+	//断掉所有tcp连接(文件描述符销毁等)
 	if l.tcpServer != nil {
 		l.tcpServer.CloseAll()
 	}
 
+	//如果有http监听，则关闭
 	if l.httpListener != nil {
 		l.httpListener.Close()
 	}
+	//由于tcp协程和http协程可能还有连接 正在处理，等待处理完成
 	l.waitGroup.Wait()
 }

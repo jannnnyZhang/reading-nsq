@@ -18,6 +18,7 @@ import (
 	"github.com/nsqio/nsq/nsqd"
 )
 
+//如果是源码运行 请运行 go run main.go options.go
 type program struct {
 	once sync.Once
 	nsqd *nsqd.NSQD

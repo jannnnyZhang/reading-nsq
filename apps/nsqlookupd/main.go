@@ -107,6 +107,7 @@ func (p *program) Start() error {
 		//如果有err,则执行stop方法,并且终止
 		if err != nil {
 			p.Stop()
+			//退出
 			os.Exit(1)
 		}
 	}()
@@ -115,6 +116,7 @@ func (p *program) Start() error {
 }
 
 func (p *program) Stop() error {
+	//用了once锁，只exit一次
 	p.once.Do(func() {
 		p.nsqlookupd.Exit()
 	})

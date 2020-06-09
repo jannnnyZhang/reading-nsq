@@ -25,14 +25,17 @@ func (p *LookupProtocolV1) IOLoop(conn net.Conn) error {
 	var err error
 	var line string
 
+	//实例化客户端
 	client := NewClientV1(conn)
+	//实例化读取器
 	reader := bufio.NewReader(client)
 	for {
+		//按行读取
 		line, err = reader.ReadString('\n')
 		if err != nil {
 			break
 		}
-
+		fmt.Println(line)
 		line = strings.TrimSpace(line)
 		params := strings.Split(line, " ")
 
