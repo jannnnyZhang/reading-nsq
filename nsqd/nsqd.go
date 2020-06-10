@@ -275,6 +275,7 @@ func (n *NSQD) Main() error {
 	}
 
 	n.waitGroup.Wrap(n.queueScanLoop)
+	//注册至lookupd
 	n.waitGroup.Wrap(n.lookupLoop)
 	if n.getOpts().StatsdAddress != "" {
 		n.waitGroup.Wrap(n.statsdLoop)

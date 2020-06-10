@@ -97,7 +97,7 @@ func (p *program) Start() error {
 	if err != nil {
 		logFatal("failed to instantiate nsqlookupd", err)
 	}
-	//赋值
+
 	p.nsqlookupd = nsqlookupd
 
 	//由于start不能够被阻塞，所以这里需要开一个协程
@@ -123,6 +123,7 @@ func (p *program) Stop() error {
 	return nil
 }
 
+//错误打印
 func logFatal(f string, args ...interface{}) {
 	lg.LogFatal("[nsqlookupd] ", f, args...)
 }

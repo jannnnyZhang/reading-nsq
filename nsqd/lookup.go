@@ -92,6 +92,7 @@ func (n *NSQD) lookupLoop() {
 	ticker := time.Tick(15 * time.Second)
 	for {
 		if connect {
+			//遍历每一个lookupd地址
 			for _, host := range n.getOpts().NSQLookupdTCPAddresses {
 				if in(host, lookupAddrs) {
 					continue
@@ -99,6 +100,10 @@ func (n *NSQD) lookupLoop() {
 				n.logf(LOG_INFO, "LOOKUP(%s): adding peer", host)
 				lookupPeer := newLookupPeer(host, n.getOpts().MaxBodySize, n.logf,
 					connectCallback(n, hostname))
+				//先发送协议版本
+				//发送IDENTITY命令
+				//发送BODY长度 (int类型，BigEndian)
+				//发送BODY(身份信息，包括版本，端口等)
 				lookupPeer.Command(nil) // start the connection
 				lookupPeers = append(lookupPeers, lookupPeer)
 				lookupAddrs = append(lookupAddrs, host)
