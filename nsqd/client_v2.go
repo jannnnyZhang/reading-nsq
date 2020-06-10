@@ -156,18 +156,19 @@ func (c *clientV2) String() string {
 
 func (c *clientV2) Identify(data identifyDataV2) error {
 	c.ctx.nsqd.logf(LOG_INFO, "[%s] IDENTIFY: %+v", c, data)
-
+	//这里保证并发安全，如果同时发了两次Identify，可以保证存的都是同一次的
 	c.metaLock.Lock()
 	c.ClientID = data.ClientID
 	c.Hostname = data.Hostname
 	c.UserAgent = data.UserAgent
 	c.metaLock.Unlock()
 
+	//设置心跳检测,有锁
 	err := c.SetHeartbeatInterval(data.HeartbeatInterval)
 	if err != nil {
 		return err
 	}
-
+	//
 	err = c.SetOutputBuffer(data.OutputBufferSize, data.OutputBufferTimeout)
 	if err != nil {
 		return err
@@ -177,7 +178,7 @@ func (c *clientV2) Identify(data identifyDataV2) error {
 	if err != nil {
 		return err
 	}
-
+	//设置timeout
 	err = c.SetMsgTimeout(data.MsgTimeout)
 	if err != nil {
 		return err
@@ -189,7 +190,7 @@ func (c *clientV2) Identify(data identifyDataV2) error {
 		SampleRate:          c.SampleRate,
 		MsgTimeout:          c.MsgTimeout,
 	}
-
+	//设入messagePump
 	// update the client's message pump
 	select {
 	case c.IdentifyEventChan <- ie:

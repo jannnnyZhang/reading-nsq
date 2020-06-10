@@ -244,6 +244,7 @@ func (n *NSQD) RemoveClient(clientID int64) {
 }
 
 func (n *NSQD) Main() error {
+	//这里代码结构和lookupd一致,详细注释看下nsqlookupd.go
 	ctx := &context{n}
 
 	exitCh := make(chan error)
@@ -258,15 +259,18 @@ func (n *NSQD) Main() error {
 	}
 
 	n.tcpServer.ctx = ctx
+	//tcp监听
 	n.waitGroup.Wrap(func() {
 		exitFunc(protocol.TCPServer(n.tcpListener, n.tcpServer, n.logf))
 	})
 
+	//http监听
 	httpServer := newHTTPServer(ctx, false, n.getOpts().TLSRequired == TLSRequired)
 	n.waitGroup.Wrap(func() {
 		exitFunc(http_api.Serve(n.httpListener, httpServer, "HTTP", n.logf))
 	})
 
+	//https监听
 	if n.tlsConfig != nil && n.getOpts().HTTPSAddress != "" {
 		httpsServer := newHTTPServer(ctx, true, true)
 		n.waitGroup.Wrap(func() {

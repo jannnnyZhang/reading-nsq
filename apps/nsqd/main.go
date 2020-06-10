@@ -82,6 +82,7 @@ func (p *program) Start() error {
 	}
 
 	go func() {
+		//主逻辑
 		err := p.nsqd.Main()
 		if err != nil {
 			p.Stop()

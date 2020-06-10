@@ -54,6 +54,7 @@ func (p *protocolV2) IOLoop(conn net.Conn) error {
 	<-messagePumpStartedChan
 
 	for {
+		//client.HeartbeatInterval 默认吗是30秒，所以会设写超时时间，阻塞写
 		if client.HeartbeatInterval > 0 {
 			client.SetReadDeadline(time.Now().Add(client.HeartbeatInterval * 2))
 		} else {
@@ -62,6 +63,7 @@ func (p *protocolV2) IOLoop(conn net.Conn) error {
 
 		// ReadSlice does not allocate new space for the data each request
 		// ie. the returned slice is only valid until the next call to it
+		//读取至第一个换行符
 		line, err = client.Reader.ReadSlice('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -73,16 +75,20 @@ func (p *protocolV2) IOLoop(conn net.Conn) error {
 		}
 
 		// trim the '\n'
+		//去掉最后一个'\n'
 		line = line[:len(line)-1]
 		// optionally trim the '\r'
+		//去掉最后一个'\r'
 		if len(line) > 0 && line[len(line)-1] == '\r' {
 			line = line[:len(line)-1]
 		}
+		//参数切割
 		params := bytes.Split(line, separatorBytes)
 
 		p.ctx.nsqd.logf(LOG_DEBUG, "PROTOCOL(V2): [%s] %s", client, params)
 
 		var response []byte
+		//执行命令
 		response, err = p.Exec(client, params)
 		if err != nil {
 			ctx := ""
@@ -142,9 +148,11 @@ func (p *protocolV2) SendMessage(client *clientV2, msg *Message) error {
 }
 
 func (p *protocolV2) Send(client *clientV2, frameType int32, data []byte) error {
+	//要加锁，保证写tcp缓存并发安全
 	client.writeLock.Lock()
 
 	var zeroTime time.Time
+	//client.HeartbeatInterval 默认吗是30秒，所以会设写超时时间，阻塞写
 	if client.HeartbeatInterval > 0 {
 		client.SetWriteDeadline(time.Now().Add(client.HeartbeatInterval))
 	} else {
@@ -157,6 +165,7 @@ func (p *protocolV2) Send(client *clientV2, frameType int32, data []byte) error 
 		return err
 	}
 
+	//flush 发送tcp缓存
 	if frameType != frameTypeMessage {
 		err = client.Flush()
 	}
@@ -167,6 +176,8 @@ func (p *protocolV2) Send(client *clientV2, frameType int32, data []byte) error 
 }
 
 func (p *protocolV2) Exec(client *clientV2, params [][]byte) ([]byte, error) {
+	fmt.Println(string(params[0]))
+	//身份认证
 	if bytes.Equal(params[0], []byte("IDENTIFY")) {
 		return p.IDENTIFY(client, params)
 	}
@@ -276,9 +287,12 @@ func (p *protocolV2) messagePump(client *clientV2, startedChan chan bool) {
 			// you can't SUB anymore
 			subEventChan = nil
 		case identifyData := <-identifyEventChan:
+			//这里是通过clent_v2.go中的Identify方法过来
+			//身份认证只能够一次
 			// you can't IDENTIFY anymore
 			identifyEventChan = nil
 
+			//这里会重新设置outputBufferTicker,heartbeatTicker,sampleRate,msgTimeout
 			outputBufferTicker.Stop()
 			if identifyData.OutputBufferTimeout > 0 {
 				outputBufferTicker = time.NewTicker(identifyData.OutputBufferTimeout)
@@ -349,7 +363,7 @@ exit:
 
 func (p *protocolV2) IDENTIFY(client *clientV2, params [][]byte) ([]byte, error) {
 	var err error
-
+	//如果已经是连接状态不应该发IDENTITY,会报错
 	if atomic.LoadInt32(&client.State) != stateInit {
 		return nil, protocol.NewFatalClientErr(nil, "E_INVALID", "cannot IDENTIFY in current state")
 	}
@@ -359,6 +373,7 @@ func (p *protocolV2) IDENTIFY(client *clientV2, params [][]byte) ([]byte, error)
 		return nil, protocol.NewFatalClientErr(err, "E_BAD_BODY", "IDENTIFY failed to read body size")
 	}
 
+	//如果身份信息过大会报错 MaxBodySize默认是5*1024*1024  5MB
 	if int64(bodyLen) > p.ctx.nsqd.getOpts().MaxBodySize {
 		return nil, protocol.NewFatalClientErr(nil, "E_BAD_BODY",
 			fmt.Sprintf("IDENTIFY body too big %d > %d", bodyLen, p.ctx.nsqd.getOpts().MaxBodySize))
@@ -377,6 +392,7 @@ func (p *protocolV2) IDENTIFY(client *clientV2, params [][]byte) ([]byte, error)
 
 	// body is a json structure with producer information
 	var identifyData identifyDataV2
+	//解析至identifyData
 	err = json.Unmarshal(body, &identifyData)
 	if err != nil {
 		return nil, protocol.NewFatalClientErr(err, "E_BAD_BODY", "IDENTIFY failed to decode JSON body")
@@ -390,6 +406,7 @@ func (p *protocolV2) IDENTIFY(client *clientV2, params [][]byte) ([]byte, error)
 	}
 
 	// bail out early if we're not negotiating features
+	//这里identifyData.FeatureNegotiation 默认是true
 	if !identifyData.FeatureNegotiation {
 		return okBytes, nil
 	}
@@ -409,6 +426,7 @@ func (p *protocolV2) IDENTIFY(client *clientV2, params [][]byte) ([]byte, error)
 		return nil, protocol.NewFatalClientErr(nil, "E_IDENTIFY_FAILED", "cannot enable both deflate and snappy compression")
 	}
 
+	//响应
 	resp, err := json.Marshal(struct {
 		MaxRdyCount         int64  `json:"max_rdy_count"`
 		Version             string `json:"version"`
@@ -424,15 +442,15 @@ func (p *protocolV2) IDENTIFY(client *clientV2, params [][]byte) ([]byte, error)
 		OutputBufferSize    int    `json:"output_buffer_size"`
 		OutputBufferTimeout int64  `json:"output_buffer_timeout"`
 	}{
-		MaxRdyCount:         p.ctx.nsqd.getOpts().MaxRdyCount,
-		Version:             version.Binary,
-		MaxMsgTimeout:       int64(p.ctx.nsqd.getOpts().MaxMsgTimeout / time.Millisecond),
-		MsgTimeout:          int64(client.MsgTimeout / time.Millisecond),
+		MaxRdyCount:         p.ctx.nsqd.getOpts().MaxRdyCount,//最大接受消息
+		Version:             version.Binary,//版本
+		MaxMsgTimeout:       int64(p.ctx.nsqd.getOpts().MaxMsgTimeout / time.Millisecond),//最大超时
+		MsgTimeout:          int64(client.MsgTimeout / time.Millisecond),//客户端超时时间
 		TLSv1:               tlsv1,
 		Deflate:             deflate,
 		DeflateLevel:        deflateLevel,
 		MaxDeflateLevel:     p.ctx.nsqd.getOpts().MaxDeflateLevel,
-		Snappy:              snappy,
+		Snappy:              snappy, //压缩
 		SampleRate:          client.SampleRate,
 		AuthRequired:        p.ctx.nsqd.IsAuthEnabled(),
 		OutputBufferSize:    client.OutputBufferSize,
