@@ -38,8 +38,10 @@ func (p *protocolV2) IOLoop(conn net.Conn) error {
 	var line []byte
 	var zeroTime time.Time
 
+	//ID自增
 	clientID := atomic.AddInt64(&p.ctx.nsqd.clientIDSequence, 1)
 	client := newClientV2(clientID, conn, p.ctx)
+	//存储client
 	p.ctx.nsqd.AddClient(client.ID, client)
 
 	// synchronize the startup of messagePump in order

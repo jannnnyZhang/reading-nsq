@@ -117,6 +117,7 @@ func (n *NSQD) lookupLoop() {
 			// send a heartbeat and read a response (read detects closed conns)
 			for _, lookupPeer := range lookupPeers {
 				n.logf(LOG_DEBUG, "LOOKUPD(%s): sending heartbeat", lookupPeer)
+				//ping命令进行心跳
 				cmd := nsq.Ping()
 				_, err := lookupPeer.Command(cmd)
 				if err != nil {

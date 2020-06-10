@@ -31,11 +31,13 @@ func (p *tcpServer) Handle(clientConn net.Conn) {
 	p.ctx.nsqd.logf(LOG_INFO, "CLIENT(%s): desired protocol magic '%s'",
 		clientConn.RemoteAddr(), protocolMagic)
 
+	//  V2协议
 	var prot protocol.Protocol
 	switch protocolMagic {
 	case "  V2":
 		prot = &protocolV2{ctx: p.ctx}
 	default:
+		//返回错误
 		protocol.SendFramedResponse(clientConn, frameTypeError, []byte("E_BAD_PROTOCOL"))
 		clientConn.Close()
 		p.ctx.nsqd.logf(LOG_ERROR, "client(%s) bad protocol magic '%s'",
@@ -43,16 +45,18 @@ func (p *tcpServer) Handle(clientConn net.Conn) {
 		return
 	}
 
+	//存储连接信息
 	p.conns.Store(clientConn.RemoteAddr(), clientConn)
 
 	err = prot.IOLoop(clientConn)
 	if err != nil {
 		p.ctx.nsqd.logf(LOG_ERROR, "client(%s) - %s", clientConn.RemoteAddr(), err)
 	}
-
+	//删除连接信息
 	p.conns.Delete(clientConn.RemoteAddr())
 }
 
+//关闭所有连接
 func (p *tcpServer) CloseAll() {
 	p.conns.Range(func(k, v interface{}) bool {
 		v.(net.Conn).Close()

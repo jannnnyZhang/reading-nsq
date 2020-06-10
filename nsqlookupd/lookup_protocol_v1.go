@@ -42,6 +42,7 @@ func (p *LookupProtocolV1) IOLoop(conn net.Conn) error {
 		params := strings.Split(line, " ")
 
 		var response []byte
+		//执行命令
 		response, err = p.Exec(client, reader, params)
 		if err != nil {
 			ctx := ""
@@ -63,6 +64,7 @@ func (p *LookupProtocolV1) IOLoop(conn net.Conn) error {
 			continue
 		}
 
+		//响应返回
 		if response != nil {
 			_, err = protocol.SendResponse(client, response)
 			if err != nil {
@@ -88,9 +90,9 @@ func (p *LookupProtocolV1) IOLoop(conn net.Conn) error {
 func (p *LookupProtocolV1) Exec(client *ClientV1, reader *bufio.Reader, params []string) ([]byte, error) {
 	fmt.Println(params)
 	switch params[0] {
-	case "PING":
+	case "PING": //心跳
 		return p.PING(client, params)
-	case "IDENTIFY":
+	case "IDENTIFY": //身份认证
 		return p.IDENTIFY(client, reader, params[1:])
 	case "REGISTER":
 		return p.REGISTER(client, reader, params[1:])
@@ -289,6 +291,7 @@ func (p *LookupProtocolV1) PING(client *ClientV1, params []string) ([]byte, erro
 		now := time.Now()
 		p.ctx.nsqlookupd.logf(LOG_INFO, "CLIENT(%s): pinged (last ping %s)", client.peerInfo.id,
 			now.Sub(cur))
+		//更新时间
 		atomic.StoreInt64(&client.peerInfo.lastUpdate, now.UnixNano())
 	}
 	return []byte("OK"), nil
