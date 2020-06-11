@@ -283,7 +283,7 @@ func (p *protocolV2) messagePump(client *clientV2, startedChan chan bool) {
 			}
 			flushed = true
 		case <-client.ReadyStateChan:
-		case subChannel = <-subEventChan:
+		case subChannel = <-subEventChan: //这里是订阅以后确定了客户端所接受的channel,订阅过就不能改了
 			// you can't SUB anymore
 			subEventChan = nil
 		case identifyData := <-identifyEventChan:
@@ -334,7 +334,8 @@ func (p *protocolV2) messagePump(client *clientV2, startedChan chan bool) {
 				goto exit
 			}
 			flushed = false
-		case msg := <-memoryMsgChan:
+		case msg := <-memoryMsgChan: //从内存消息通道接受了消息
+			//sampleRate不设0可能就丢失了,sampleRate意思就是采样率...
 			if sampleRate > 0 && rand.Int31n(100) > sampleRate {
 				continue
 			}
@@ -599,6 +600,7 @@ func (p *protocolV2) CheckAuth(client *clientV2, cmd, topicName, channelName str
 	return nil
 }
 
+//订阅
 func (p *protocolV2) SUB(client *clientV2, params [][]byte) ([]byte, error) {
 	if atomic.LoadInt32(&client.State) != stateInit {
 		return nil, protocol.NewFatalClientErr(nil, "E_INVALID", "cannot SUB in current state")
@@ -633,8 +635,11 @@ func (p *protocolV2) SUB(client *clientV2, params [][]byte) ([]byte, error) {
 	// Avoid adding a client to an ephemeral channel / topic which has started exiting.
 	var channel *Channel
 	for {
+		//获取topic
 		topic := p.ctx.nsqd.GetTopic(topicName)
+		//获取channel
 		channel = topic.GetChannel(channelName)
+		//channel存入client
 		if err := channel.AddClient(client.ID, client); err != nil {
 			return nil, protocol.NewFatalClientErr(nil, "E_TOO_MANY_CHANNEL_CONSUMERS",
 				fmt.Sprintf("channel consumers for %s:%s exceeds limit of %d",
@@ -643,14 +648,16 @@ func (p *protocolV2) SUB(client *clientV2, params [][]byte) ([]byte, error) {
 
 		if (channel.ephemeral && channel.Exiting()) || (topic.ephemeral && topic.Exiting()) {
 			channel.RemoveClient(client.ID)
+			//这里就是等被销毁
 			time.Sleep(1 * time.Millisecond)
 			continue
 		}
 		break
 	}
+	//状态标记成已订阅
 	atomic.StoreInt32(&client.State, stateSubscribed)
 	client.Channel = channel
-	// update message pump
+	// update message pump 这里是更新消息泵里的channel通道，更新以后messagepump通过获取channel信息来发送给订阅方
 	client.SubEventChan <- channel
 
 	return okBytes, nil
