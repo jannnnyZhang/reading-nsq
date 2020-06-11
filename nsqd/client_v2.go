@@ -361,6 +361,7 @@ func (c *clientV2) SendingMessage() {
 	atomic.AddUint64(&c.MessageCount, 1)
 }
 
+//推送次数的一个计数
 func (c *clientV2) PublishedMessage(topic string, count uint64) {
 	c.metaLock.Lock()
 	c.pubCounts[topic] += count

@@ -54,6 +54,9 @@ type NSQD struct {
 	errValue  atomic.Value
 	startTime time.Time
 
+	/**
+	这里不用sync.Map，原因是绝大部分情况都是读取，少部分是写入，那么大多数情况只要用读锁就可以了
+	 */
 	topicMap map[string]*Topic
 
 	clientLock sync.RWMutex
@@ -466,6 +469,11 @@ func (n *NSQD) Exit() {
 // to return a pointer to a Topic object (potentially new)
 func (n *NSQD) GetTopic(topicName string) *Topic {
 	// most likely, we already have this topic, so try read lock first.
+	/**
+		fastPath
+		这里先用读锁读取，读到就返回
+		如果没有读到，那么需要加互斥锁，再读取一遍,有可能在读锁Unlock和互斥锁加锁之间，top已经生成
+	 */
 	n.RLock()
 	t, ok := n.topicMap[topicName]
 	n.RUnlock()
@@ -483,6 +491,7 @@ func (n *NSQD) GetTopic(topicName string) *Topic {
 	deleteCallback := func(t *Topic) {
 		n.DeleteExistingTopic(t.name)
 	}
+	//生成topic
 	t = NewTopic(topicName, &context{n}, deleteCallback)
 	n.topicMap[topicName] = t
 
@@ -498,6 +507,7 @@ func (n *NSQD) GetTopic(topicName string) *Topic {
 
 	// if using lookupd, make a blocking call to get the topics, and immediately create them.
 	// this makes sure that any message received is buffered to the right channels
+	//如果连接了lookupd,同步lookupd该top的channel,保证数据一致
 	lookupdHTTPAddrs := n.lookupdHTTPAddrs()
 	if len(lookupdHTTPAddrs) > 0 {
 		channelNames, err := n.ci.GetLookupdTopicChannels(t.name, lookupdHTTPAddrs)
@@ -508,6 +518,7 @@ func (n *NSQD) GetTopic(topicName string) *Topic {
 			if strings.HasSuffix(channelName, "#ephemeral") {
 				continue // do not create ephemeral channel with no consumer client
 			}
+			//top加上对应channel
 			t.GetChannel(channelName)
 		}
 	} else if len(n.getOpts().NSQLookupdTCPAddresses) > 0 {
@@ -515,6 +526,7 @@ func (n *NSQD) GetTopic(topicName string) *Topic {
 	}
 
 	// now that all channels are added, start topic messagePump
+	//启动
 	t.Start()
 	return t
 }

@@ -80,7 +80,10 @@ func NewTopic(topicName string, ctx *context, deleteCallback func(*Topic)) *Topi
 			dqLogf,
 		)
 	}
-
+	/**
+		消息泵
+		协程对topic的处理都是通过消息泵完成，而不是直接操作topic,保证并发安全
+	 */
 	t.waitGroup.Wrap(t.messagePump)
 
 	t.ctx.nsqd.Notify(t)
@@ -88,6 +91,7 @@ func NewTopic(topicName string, ctx *context, deleteCallback func(*Topic)) *Topi
 	return t
 }
 
+//这里会触发messagePump
 func (t *Topic) Start() {
 	select {
 	case t.startChan <- 1:
@@ -152,6 +156,7 @@ func (t *Topic) DeleteExistingChannel(channelName string) error {
 		t.Unlock()
 		return errors.New("channel does not exist")
 	}
+	//删掉channelMap中对应channelName
 	delete(t.channelMap, channelName)
 	// not defered so that we can continue while the channel async closes
 	numChannels := len(t.channelMap)
@@ -161,14 +166,16 @@ func (t *Topic) DeleteExistingChannel(channelName string) error {
 
 	// delete empties the channel before closing
 	// (so that we dont leave any messages around)
+	//关掉该channel
 	channel.Delete()
 
 	// update messagePump state
 	select {
+	//这里发送给channelUpdateChan 更新消息泵中的chans
 	case t.channelUpdateChan <- 1:
 	case <-t.exitChan:
 	}
-
+	//如果已经没有channel了，并且是ephemeral属性的，就删除top
 	if numChannels == 0 && t.ephemeral == true {
 		go t.deleter.Do(func() { t.deleteCallback(t) })
 	}
@@ -178,21 +185,28 @@ func (t *Topic) DeleteExistingChannel(channelName string) error {
 
 // PutMessage writes a Message to the queue
 func (t *Topic) PutMessage(m *Message) error {
+	/**
+		这里用读锁，想到的点是
+		1.t.put不会对原数据的一致性产生影响
+		2.只要不要对channel修改，channel修改的地方加的都是Lock
+	 */
 	t.RLock()
 	defer t.RUnlock()
 	if atomic.LoadInt32(&t.exitFlag) == 1 {
 		return errors.New("exiting")
 	}
-	err := t.put(m)
+	err := t.put(m)//topic接受消息
 	if err != nil {
 		return err
 	}
+	//计数修改
 	atomic.AddUint64(&t.messageCount, 1)
 	atomic.AddUint64(&t.messageBytes, uint64(len(m.Body)))
 	return nil
 }
 
 // PutMessages writes multiple Messages to the queue
+//批量版的PutMessage
 func (t *Topic) PutMessages(msgs []*Message) error {
 	t.RLock()
 	defer t.RUnlock()
@@ -219,7 +233,7 @@ func (t *Topic) PutMessages(msgs []*Message) error {
 
 func (t *Topic) put(m *Message) error {
 	select {
-	case t.memoryMsgChan <- m:
+	case t.memoryMsgChan <- m: //如果内存消息channel未满，则写入，已满则写入文件
 	default:
 		b := bufferPoolGet()
 		err := writeMessageToBackend(b, m, t.backend)
@@ -258,11 +272,15 @@ func (t *Topic) messagePump() {
 			continue
 		case <-t.exitChan:
 			goto exit
-		case <-t.startChan:
+		case <-t.startChan: //创建topic最终是向startChan 发送数据，这边接受到数据后，相当于消息泵正式启动
 		}
 		break
 	}
 	t.RLock()
+	/**
+		这里为啥不直接用t.channelMap 而是重新赋值
+		原因应该是保证性能，由于channelMap修改会加锁，那么发消息时直接从channelMap取channel并逐一发送的过程中势必产生竞争
+	 */
 	for _, c := range t.channelMap {
 		chans = append(chans, c)
 	}
@@ -275,16 +293,17 @@ func (t *Topic) messagePump() {
 	// main message loop
 	for {
 		select {
-		case msg = <-memoryMsgChan:
+		case msg = <-memoryMsgChan: //内存消息通过取出msg
 		case buf = <-backendChan:
 			msg, err = decodeMessage(buf)
 			if err != nil {
 				t.ctx.nsqd.logf(LOG_ERROR, "failed to decode message - %s", err)
 				continue
 			}
-		case <-t.channelUpdateChan:
-			chans = chans[:0]
+		case <-t.channelUpdateChan: //channel修改
+			chans = chans[:0] //重置
 			t.RLock()
+			//重新从t.ChannelMap里取
 			for _, c := range t.channelMap {
 				chans = append(chans, c)
 			}
@@ -317,6 +336,7 @@ func (t *Topic) messagePump() {
 			// fastpath to avoid copy if its the first channel
 			// (the topic already created the first copy)
 			if i > 0 {
+				//拷贝，不然各个channel的消息都是引用关系
 				chanMsg = NewMessage(msg.ID, msg.Body)
 				chanMsg.Timestamp = msg.Timestamp
 				chanMsg.deferred = msg.deferred
@@ -325,7 +345,7 @@ func (t *Topic) messagePump() {
 				channel.PutMessageDeferred(chanMsg, chanMsg.deferred)
 				continue
 			}
-			err := channel.PutMessage(chanMsg)
+			err := channel.PutMessage(chanMsg) //消息存入channel
 			if err != nil {
 				t.ctx.nsqd.logf(LOG_ERROR,
 					"TOPIC(%s) ERROR: failed to put msg(%s) to channel(%s) - %s",

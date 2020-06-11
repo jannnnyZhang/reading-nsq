@@ -295,7 +295,7 @@ func (c *Channel) PutMessage(m *Message) error {
 	if c.Exiting() {
 		return errors.New("exiting")
 	}
-	err := c.put(m)
+	err := c.put(m) //
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func (c *Channel) PutMessage(m *Message) error {
 
 func (c *Channel) put(m *Message) error {
 	select {
-	case c.memoryMsgChan <- m:
+	case c.memoryMsgChan <- m: //存入channel的内存消息通过
 	default:
 		b := bufferPoolGet()
 		err := writeMessageToBackend(b, m, c.backend)

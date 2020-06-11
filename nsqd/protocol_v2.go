@@ -148,7 +148,7 @@ func (p *protocolV2) SendMessage(client *clientV2, msg *Message) error {
 }
 
 func (p *protocolV2) Send(client *clientV2, frameType int32, data []byte) error {
-	//要加锁，保证写tcp缓存并发安全
+	//要加锁，tcp缓存并发安全
 	client.writeLock.Lock()
 
 	var zeroTime time.Time
@@ -186,13 +186,13 @@ func (p *protocolV2) Exec(client *clientV2, params [][]byte) ([]byte, error) {
 		return nil, err
 	}
 	switch {
-	case bytes.Equal(params[0], []byte("FIN")):
+	case bytes.Equal(params[0], []byte("FIN")): //消费者处理消息后回复(ACK)
 		return p.FIN(client, params)
 	case bytes.Equal(params[0], []byte("RDY")):
 		return p.RDY(client, params)
 	case bytes.Equal(params[0], []byte("REQ")):
 		return p.REQ(client, params)
-	case bytes.Equal(params[0], []byte("PUB")):
+	case bytes.Equal(params[0], []byte("PUB"))://生产者推送
 		return p.PUB(client, params)
 	case bytes.Equal(params[0], []byte("MPUB")):
 		return p.MPUB(client, params)
@@ -202,7 +202,7 @@ func (p *protocolV2) Exec(client *clientV2, params [][]byte) ([]byte, error) {
 		return p.NOP(client, params)
 	case bytes.Equal(params[0], []byte("TOUCH")):
 		return p.TOUCH(client, params)
-	case bytes.Equal(params[0], []byte("SUB")):
+	case bytes.Equal(params[0], []byte("SUB"))://消费者订阅
 		return p.SUB(client, params)
 	case bytes.Equal(params[0], []byte("CLS")):
 		return p.CLS(client, params)
@@ -786,13 +786,13 @@ func (p *protocolV2) PUB(client *clientV2, params [][]byte) ([]byte, error) {
 	if len(params) < 2 {
 		return nil, protocol.NewFatalClientErr(nil, "E_INVALID", "PUB insufficient number of parameters")
 	}
-
+	//获取topic名称
 	topicName := string(params[1])
 	if !protocol.IsValidTopicName(topicName) {
 		return nil, protocol.NewFatalClientErr(nil, "E_BAD_TOPIC",
 			fmt.Sprintf("PUB topic name %q is not valid", topicName))
 	}
-
+	//读取消息长度
 	bodyLen, err := readLen(client.Reader, client.lenSlice)
 	if err != nil {
 		return nil, protocol.NewFatalClientErr(err, "E_BAD_MESSAGE", "PUB failed to read message body size")
@@ -807,24 +807,24 @@ func (p *protocolV2) PUB(client *clientV2, params [][]byte) ([]byte, error) {
 		return nil, protocol.NewFatalClientErr(nil, "E_BAD_MESSAGE",
 			fmt.Sprintf("PUB message too big %d > %d", bodyLen, p.ctx.nsqd.getOpts().MaxMsgSize))
 	}
-
+	//读取消息Body
 	messageBody := make([]byte, bodyLen)
 	_, err = io.ReadFull(client.Reader, messageBody)
 	if err != nil {
 		return nil, protocol.NewFatalClientErr(err, "E_BAD_MESSAGE", "PUB failed to read message body")
 	}
-
+	//检验auth认证
 	if err := p.CheckAuth(client, "PUB", topicName, ""); err != nil {
 		return nil, err
 	}
-
+	//通过topic名称获取topic
 	topic := p.ctx.nsqd.GetTopic(topicName)
+	//构建消息结构体
 	msg := NewMessage(topic.GenerateID(), messageBody)
-	err = topic.PutMessage(msg)
+	err = topic.PutMessage(msg)//存入topic
 	if err != nil {
 		return nil, protocol.NewFatalClientErr(err, "E_PUB_FAILED", "PUB failed "+err.Error())
 	}
-
 	client.PublishedMessage(topicName, 1)
 
 	return okBytes, nil
