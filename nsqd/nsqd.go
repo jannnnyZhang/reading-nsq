@@ -331,10 +331,11 @@ func writeSyncFile(fn string, data []byte) error {
 	return err
 }
 
+//加载元数据
 func (n *NSQD) LoadMetadata() error {
 	atomic.StoreInt32(&n.isLoading, 1)
 	defer atomic.StoreInt32(&n.isLoading, 0)
-
+	//从nsqd.dat获取
 	fn := newMetadataFile(n.getOpts())
 
 	data, err := readOrEmpty(fn)
@@ -346,6 +347,7 @@ func (n *NSQD) LoadMetadata() error {
 	}
 
 	var m meta
+	//解析
 	err = json.Unmarshal(data, &m)
 	if err != nil {
 		return fmt.Errorf("failed to parse metadata in %s - %s", fn, err)
@@ -356,10 +358,12 @@ func (n *NSQD) LoadMetadata() error {
 			n.logf(LOG_WARN, "skipping creation of invalid topic %s", t.Name)
 			continue
 		}
+		//初始化topic
 		topic := n.GetTopic(t.Name)
 		if t.Paused {
 			topic.Pause()
 		}
+		//初始化topic下的channel
 		for _, c := range t.Channels {
 			if !protocol.IsValidChannelName(c.Name) {
 				n.logf(LOG_WARN, "skipping creation of invalid channel %s", c.Name)
@@ -370,11 +374,13 @@ func (n *NSQD) LoadMetadata() error {
 				channel.Pause()
 			}
 		}
+		//启动
 		topic.Start()
 	}
 	return nil
 }
 
+//保存元数据
 func (n *NSQD) PersistMetadata() error {
 	// persist metadata about what topics/channels we have, across restarts
 	fileName := newMetadataFile(n.getOpts())
@@ -417,11 +423,12 @@ func (n *NSQD) PersistMetadata() error {
 	}
 
 	tmpFileName := fmt.Sprintf("%s.%d.tmp", fileName, rand.Int())
-
+	//这里需要刷盘 fsync
 	err = writeSyncFile(tmpFileName, data)
 	if err != nil {
 		return err
 	}
+	//覆盖至原文件
 	err = os.Rename(tmpFileName, fileName)
 	if err != nil {
 		return err
@@ -448,6 +455,7 @@ func (n *NSQD) Exit() {
 	}
 
 	n.Lock()
+	//退出需要存元数据
 	err := n.PersistMetadata()
 	if err != nil {
 		n.logf(LOG_ERROR, "failed to persist metadata - %s", err)
@@ -567,6 +575,7 @@ func (n *NSQD) DeleteExistingTopic(topicName string) error {
 	return nil
 }
 
+//异步通知，更新元数据 nsqd.dat
 func (n *NSQD) Notify(v interface{}) {
 	// since the in-memory metadata is incomplete,
 	// should not persist metadata while loading it.
@@ -581,6 +590,9 @@ func (n *NSQD) Notify(v interface{}) {
 			if !persist {
 				return
 			}
+			/**
+				保存原数据的地方都需要加锁，防竞争，除了初始化阶段（nsqd都没启动当然不会存在竞争）
+			 */
 			n.Lock()
 			err := n.PersistMetadata()
 			if err != nil {
@@ -611,6 +623,10 @@ func (n *NSQD) channels() []*Channel {
 // 	1 <= pool <= min(num * 0.25, QueueScanWorkerPoolMax)
 //
 func (n *NSQD) resizePool(num int, workCh chan *Channel, responseCh chan bool, closeCh chan int) {
+	/**
+		确认poolSize范围 1 <= pool <= min(num * 0.25, QueueScanWorkerPoolMax)
+		QueueScanWorkerPoolMax默认是4
+	 */
 	idealPoolSize := int(float64(num) * 0.25)
 	if idealPoolSize < 1 {
 		idealPoolSize = 1
@@ -618,13 +634,14 @@ func (n *NSQD) resizePool(num int, workCh chan *Channel, responseCh chan bool, c
 		idealPoolSize = n.getOpts().QueueScanWorkerPoolMax
 	}
 	for {
+		//如果和原来一致就不用改了
 		if idealPoolSize == n.poolSize {
 			break
 		} else if idealPoolSize < n.poolSize {
 			// contract
 			closeCh <- 1
 			n.poolSize--
-		} else {
+		} else { //如果比原先大了，
 			// expand
 			n.waitGroup.Wrap(func() {
 				n.queueScanWorker(workCh, responseCh, closeCh)
@@ -669,13 +686,17 @@ func (n *NSQD) queueScanWorker(workCh chan *Channel, responseCh chan bool, close
 // If QueueScanDirtyPercent (default: 25%) of the selected channels were dirty,
 // the loop continues without sleep.
 func (n *NSQD) queueScanLoop() {
+	//长度默认20
 	workCh := make(chan *Channel, n.getOpts().QueueScanSelectionCount)
+	//长度默认20
 	responseCh := make(chan bool, n.getOpts().QueueScanSelectionCount)
 	closeCh := make(chan int)
 
+	//默认100ms
 	workTicker := time.NewTicker(n.getOpts().QueueScanInterval)
+	//默认5s
 	refreshTicker := time.NewTicker(n.getOpts().QueueScanRefreshInterval)
-
+	//获取所有topic下的channel
 	channels := n.channels()
 	n.resizePool(len(channels), workCh, responseCh, closeCh)
 

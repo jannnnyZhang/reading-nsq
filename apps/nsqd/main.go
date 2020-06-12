@@ -65,6 +65,11 @@ func (p *program) Start() error {
 	//配置校验
 	cfg.Validate()
 
+	//解析配置
+	//优先级
+	//1.命令行参数
+	//2.配置文件
+	//3.默认参数
 	options.Resolve(opts, flagSet, cfg)
 	nsqd, err := nsqd.New(opts)
 	if err != nil {
@@ -72,10 +77,12 @@ func (p *program) Start() error {
 	}
 	p.nsqd = nsqd
 
+	//读取元数据 nsqd.dat
 	err = p.nsqd.LoadMetadata()
 	if err != nil {
 		logFatal("failed to load metadata - %s", err)
 	}
+	//存元数据 nsqd.dat
 	err = p.nsqd.PersistMetadata()
 	if err != nil {
 		logFatal("failed to persist metadata - %s", err)
@@ -85,6 +92,7 @@ func (p *program) Start() error {
 		//主逻辑
 		err := p.nsqd.Main()
 		if err != nil {
+			//调stop方法
 			p.Stop()
 			os.Exit(1)
 		}

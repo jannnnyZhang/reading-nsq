@@ -117,7 +117,7 @@ func NewChannel(topicName string, channelName string, ctx *context,
 		)
 	}
 
-	c.ctx.nsqd.Notify(c)
+	c.ctx.nsqd.Notify(c) //异步通知，更新元数据 nsqd.dat
 
 	return c
 }
@@ -341,7 +341,7 @@ func (c *Channel) TouchMessage(clientID int64, id MessageID, clientMsgTimeout ti
 	}
 
 	msg.pri = newTimeout.UnixNano()
-	err = c.pushInFlightMessage(msg)
+	err = c.pushInFlightMessage(msg) //放入inflight map中
 	if err != nil {
 		return err
 	}
@@ -427,12 +427,17 @@ func (c *Channel) RemoveClient(clientID int64) {
 	}
 }
 
+/**
+	inflight机制是为了保证消息不丢失，在发送前会向inflightMap中插入数据，
+	等到客户端发送FIN命令（ACK）后，再从inflightMap中删除，
+	如果没有收到ACK，会定期从inflight取出来发送
+ */
 func (c *Channel) StartInFlightTimeout(msg *Message, clientID int64, timeout time.Duration) error {
 	now := time.Now()
 	msg.clientID = clientID
 	msg.deliveryTS = now
 	msg.pri = now.Add(timeout).UnixNano()
-	err := c.pushInFlightMessage(msg)
+	err := c.pushInFlightMessage(msg) //放入inflight map中
 	if err != nil {
 		return err
 	}

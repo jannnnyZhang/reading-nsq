@@ -92,7 +92,9 @@ func (p *program) Start() error {
 	//2.配置文件
 	//3.默认参数
 	options.Resolve(opts, flagSet, cfg)
-	//实例化nsqLookupd
+	/**
+		初始化资源(监听tcp等)
+	 */
 	nsqlookupd, err := nsqlookupd.New(opts)
 	if err != nil {
 		logFatal("failed to instantiate nsqlookupd", err)
