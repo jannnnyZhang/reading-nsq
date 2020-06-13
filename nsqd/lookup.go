@@ -12,6 +12,7 @@ import (
 	"github.com/nsqio/nsq/internal/version"
 )
 
+//这个是连接回调，连接lookupd会调这个方法
 func connectCallback(n *NSQD, hostname string) func(*lookupPeer) {
 	return func(lp *lookupPeer) {
 		//组装请求body
@@ -113,7 +114,7 @@ func (n *NSQD) lookupLoop() {
 		}
 
 		select {
-		case <-ticker:
+		case <-ticker: //约15秒一次，发送心跳
 			// send a heartbeat and read a response (read detects closed conns)
 			for _, lookupPeer := range lookupPeers {
 				n.logf(LOG_DEBUG, "LOOKUPD(%s): sending heartbeat", lookupPeer)
@@ -124,12 +125,12 @@ func (n *NSQD) lookupLoop() {
 					n.logf(LOG_ERROR, "LOOKUPD(%s): %s - %s", lookupPeer, cmd, err)
 				}
 			}
-		case val := <-n.notifyChan:
+		case val := <-n.notifyChan://增删topic,增删channel都会走这里，通知nsqlookupd
 			var cmd *nsq.Command
 			var branch string
 
 			switch val.(type) {
-			case *Channel:
+			case *Channel: //channel增删
 				// notify all nsqlookupds that a new channel exists, or that it's removed
 				branch = "channel"
 				channel := val.(*Channel)
@@ -138,7 +139,7 @@ func (n *NSQD) lookupLoop() {
 				} else {
 					cmd = nsq.Register(channel.topicName, channel.name)
 				}
-			case *Topic:
+			case *Topic: //topic增删
 				// notify all nsqlookupds that a new topic exists, or that it's removed
 				branch = "topic"
 				topic := val.(*Topic)
@@ -189,6 +190,7 @@ func in(s string, lst []string) bool {
 	return false
 }
 
+//获取相连的所有nsqlookupd的地址
 func (n *NSQD) lookupdHTTPAddrs() []string {
 	var lookupHTTPAddrs []string
 	lookupPeers := n.lookupPeers.Load()

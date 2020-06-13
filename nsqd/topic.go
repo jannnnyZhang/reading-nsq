@@ -114,6 +114,7 @@ func (t *Topic) GetChannel(channelName string) *Channel {
 
 	if isNew {
 		// update messagePump state
+		//如果channel是新创建的，通知messagePump
 		select {
 		case t.channelUpdateChan <- 1:
 		case <-t.exitChan:
@@ -287,6 +288,10 @@ func (t *Topic) messagePump() {
 	t.RUnlock()
 	if len(chans) > 0 && !t.IsPaused() {
 		memoryMsgChan = t.memoryMsgChan
+		/**
+			后台消息通道，默认用的磁盘，
+
+		 */
 		backendChan = t.backend.ReadChan()
 	}
 

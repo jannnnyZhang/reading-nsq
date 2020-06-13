@@ -77,13 +77,15 @@ func NewChannel(topicName string, channelName string, ctx *context,
 	c := &Channel{
 		topicName:      topicName,
 		name:           channelName,
-		memoryMsgChan:  nil,
-		clients:        make(map[int64]Consumer),
-		deleteCallback: deleteCallback,
-		ctx:            ctx,
+		memoryMsgChan:  nil, //内存消息通道
+		clients:        make(map[int64]Consumer), //关联消费者消费者
+		deleteCallback: deleteCallback, //删除回调方法
+		ctx:            ctx, //上下文，nsqd指针
 	}
 	// create mem-queue only if size > 0 (do not use unbuffered chan)
+	//MemQueueSize默认是10000
 	if ctx.nsqd.getOpts().MemQueueSize > 0 {
+		//开启内存消息通道
 		c.memoryMsgChan = make(chan *Message, ctx.nsqd.getOpts().MemQueueSize)
 	}
 	if len(ctx.nsqd.getOpts().E2EProcessingLatencyPercentiles) > 0 {
@@ -92,11 +94,12 @@ func NewChannel(topicName string, channelName string, ctx *context,
 			ctx.nsqd.getOpts().E2EProcessingLatencyPercentiles,
 		)
 	}
-
+	//初始化优先级队列
 	c.initPQ()
 
-	if strings.HasSuffix(channelName, "#ephemeral") {
+	if strings.HasSuffix(channelName, "#ephemeral") {//如果这个channel是一次性的
 		c.ephemeral = true
+		//伪后台队列
 		c.backend = newDummyBackendQueue()
 	} else {
 		dqLogf := func(level diskqueue.LogLevel, f string, args ...interface{}) {
@@ -105,15 +108,29 @@ func NewChannel(topicName string, channelName string, ctx *context,
 		}
 		// backend names, for uniqueness, automatically include the topic...
 		backendName := getBackendName(topicName, channelName)
+		/**
+			后台消息处理，用的是磁盘，
+			大致介绍下diskqueue,
+			有一个写通道和一个读通道，diskqueue会开启一个协程去监听读写通道的数据（循环）
+			有4个指针（数据结构上并不是指针，但含义是指针，其实另外还有两个关于读的指针，为了说明问题可以简化）,分别是写点，读点，读文件编号，写文件编号，
+			举两个例子来说明:
+			1.生产者发送消息至服务端，写入写通道，监听协程读取后，写入文件，此时写文件编号是1，那么会写入1文件，并把
+			写点往前移，偏移量为消息长度
+			此时监听协程会发现写点和读点的位置不一样了，就会读取一条消息，读文件编号是1，则从1文件读取，并交给nsqd的消息泵
+			去处理后续流程,然后把读点往前移
+			2.如果写入文件发现文件满了（写点超过了MaxBytesPerFile），其实这里是写完才发现超过了的，
+				所以还是写入1文件，然后写文件编号+1，读点重置,后续会写入2文件
+			如果读消息，读了以后，发现读点超过了MaxBytesPerFile，则读文件编号+1，读点重置, 后续从读文件读取
+		 */
 		c.backend = diskqueue.New(
-			backendName,
+			backendName, //名称
 			ctx.nsqd.getOpts().DataPath,
-			ctx.nsqd.getOpts().MaxBytesPerFile,
-			int32(minValidMsgLength),
-			int32(ctx.nsqd.getOpts().MaxMsgSize)+minValidMsgLength,
-			ctx.nsqd.getOpts().SyncEvery,
-			ctx.nsqd.getOpts().SyncTimeout,
-			dqLogf,
+			ctx.nsqd.getOpts().MaxBytesPerFile,//默认100*1024*1024 100M
+			int32(minValidMsgLength), //消息最小长度,空消息
+			int32(ctx.nsqd.getOpts().MaxMsgSize)+minValidMsgLength, //消息最大长度
+			ctx.nsqd.getOpts().SyncEvery, //2500
+			ctx.nsqd.getOpts().SyncTimeout, //2s
+			dqLogf, //日志方法
 		)
 	}
 
@@ -123,20 +140,24 @@ func NewChannel(topicName string, channelName string, ctx *context,
 }
 
 func (c *Channel) initPQ() {
+	//队列容量，并不代表最大长度，Pqueue可扩大
 	pqSize := int(math.Max(1, float64(c.ctx.nsqd.getOpts().MemQueueSize)/10))
 
 	c.inFlightMutex.Lock()
+	//inflight队列
 	c.inFlightMessages = make(map[MessageID]*Message)
 	c.inFlightPQ = newInFlightPqueue(pqSize)
 	c.inFlightMutex.Unlock()
 
 	c.deferredMutex.Lock()
+	//延迟队列
 	c.deferredMessages = make(map[MessageID]*pqueue.Item)
 	c.deferredPQ = pqueue.New(pqSize)
 	c.deferredMutex.Unlock()
 }
 
 // Exiting returns a boolean indicating if this channel is closed/exiting
+// 判断是否正在退出
 func (c *Channel) Exiting() bool {
 	return atomic.LoadInt32(&c.exitFlag) == 1
 }
@@ -154,7 +175,7 @@ func (c *Channel) Close() error {
 func (c *Channel) exit(deleted bool) error {
 	c.exitMutex.Lock()
 	defer c.exitMutex.Unlock()
-
+	//channel的exitFlag标记成1,表示channel已退出
 	if !atomic.CompareAndSwapInt32(&c.exitFlag, 0, 1) {
 		return errors.New("exiting")
 	}
@@ -164,7 +185,7 @@ func (c *Channel) exit(deleted bool) error {
 
 		// since we are explicitly deleting a channel (not just at system exit time)
 		// de-register this from the lookupd
-		c.ctx.nsqd.Notify(c)
+		c.ctx.nsqd.Notify(c) //通知lookupd删除该channel
 	} else {
 		c.ctx.nsqd.logf(LOG_INFO, "CHANNEL(%s): closing", c.name)
 	}
@@ -172,10 +193,11 @@ func (c *Channel) exit(deleted bool) error {
 	// this forceably closes client connections
 	c.RLock()
 	for _, client := range c.clients {
-		client.Close()
+		client.Close() //连接在该channel上的client都可以关了
 	}
 	c.RUnlock()
 
+	//置空各种队列，包括后台消息队列,inflight,deferer
 	if deleted {
 		// empty the queue (deletes the backend files, too)
 		c.Empty()
@@ -195,7 +217,7 @@ func (c *Channel) Empty() error {
 	for _, client := range c.clients {
 		client.Empty()
 	}
-
+	//置空内存消息队列
 	for {
 		select {
 		case <-c.memoryMsgChan:

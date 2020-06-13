@@ -1,6 +1,5 @@
 package nsqd
 
-//堆结构
 type inFlightPqueue []*Message
 
 func newInFlightPqueue(capacity int) inFlightPqueue {

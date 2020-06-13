@@ -17,11 +17,11 @@ import (
 const defaultBufferSize = 16 * 1024
 
 const (
-	stateInit = iota
-	stateDisconnected
-	stateConnected
-	stateSubscribed
-	stateClosing
+	stateInit = iota //初始状态
+	stateDisconnected //断开连接
+	stateConnected	//连接中
+	stateSubscribed	//订阅中
+	stateClosing	//关闭
 )
 
 type identifyDataV2 struct {

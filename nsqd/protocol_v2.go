@@ -335,7 +335,7 @@ func (p *protocolV2) messagePump(client *clientV2, startedChan chan bool) {
 			}
 			flushed = false
 		case msg := <-memoryMsgChan: //从内存消息通道接受了消息
-			//sampleRate不设0可能就丢失了,sampleRate意思就是采样率...
+			//sampleRate不设0可能就丢失了,sampleRate是采样率
 			if sampleRate > 0 && rand.Int31n(100) > sampleRate {
 				continue
 			}

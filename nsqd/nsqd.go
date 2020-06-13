@@ -586,7 +586,7 @@ func (n *NSQD) Notify(v interface{}) {
 		// we do not block exit, see issue #123
 		select {
 		case <-n.exitChan:
-		case n.notifyChan <- v:
+		case n.notifyChan <- v://这个channel会通知，向Lookupd同步元数据
 			if !persist {
 				return
 			}
