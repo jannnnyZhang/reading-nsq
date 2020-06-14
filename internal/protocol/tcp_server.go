@@ -27,7 +27,7 @@ func TCPServer(listener net.Listener, handler TCPHandler, logf lg.AppLogFunc) er
 		if err != nil {
 			if nerr, ok := err.(net.Error); ok && nerr.Temporary() {
 				logf(lg.WARN, "temporary Accept() failure - %s", err)
-				//这个其实是一个退避策略，防止这个协程一直占用着M（线程）
+				//算是一个退避策略，防止这个协程一直占用着M（线程）
 				runtime.Gosched()
 				continue
 			}
@@ -37,12 +37,11 @@ func TCPServer(listener net.Listener, handler TCPHandler, logf lg.AppLogFunc) er
 			}
 			break
 		}
-		//连接分配给协程
-		//这里用到wg,这里要结合main的stop方法中的wg.wait()来看
-		//stop中的wg.wait()---->由于tcp协程和http协程可能还有连接 正在处理，等待处理完成
-		//那么这个地方作用是: accept报错后(stop中的监听关闭后 再accept必报错),需要让之前正在进行处理的请求处理完
-		//大概就是，整个进程等tcp服务结束，tcp服务等handle协程结束
-		//(为啥http那边不需要等handle协程结束呢?)
+		/**
+			连接分配给协程
+			这里wg的结合main的stop方法中的wg.wait()来看
+			整个进程的stop需等tcp服务结束，tcp服务等handle协程结束
+		 */
 		wg.Add(1)
 		go func() {
 			handler.Handle(clientConn)

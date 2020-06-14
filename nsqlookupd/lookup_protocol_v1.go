@@ -20,14 +20,17 @@ import (
 type LookupProtocolV1 struct {
 	ctx *Context
 }
-
+/**
+	每一个客户端连接都有一个单独handle协程来处理，handle协程主要是调用协议的IOLoop来处理
+	每一个conn会实例化成一个clientV1类
+ */
 func (p *LookupProtocolV1) IOLoop(conn net.Conn) error {
 	var err error
 	var line string
 
 	//实例化客户端
 	client := NewClientV1(conn)
-	//实例化读取器
+
 	reader := bufio.NewReader(client)
 	for {
 		//按行读取
@@ -35,7 +38,6 @@ func (p *LookupProtocolV1) IOLoop(conn net.Conn) error {
 		if err != nil {
 			break
 		}
-		fmt.Println(line)
 		//去空
 		line = strings.TrimSpace(line)
 		//解析参数
@@ -76,6 +78,7 @@ func (p *LookupProtocolV1) IOLoop(conn net.Conn) error {
 	conn.Close()
 	p.ctx.nsqlookupd.logf(LOG_INFO, "CLIENT(%s): closing", client)
 	if client.peerInfo != nil {
+		//查询是否在注册DB里，如果存在则挨个删除
 		registrations := p.ctx.nsqlookupd.DB.LookupRegistrations(client.peerInfo.id)
 		for _, r := range registrations {
 			if removed, _ := p.ctx.nsqlookupd.DB.RemoveProducer(r, client.peerInfo.id); removed {
@@ -87,16 +90,16 @@ func (p *LookupProtocolV1) IOLoop(conn net.Conn) error {
 	return err
 }
 
+//执行命令
 func (p *LookupProtocolV1) Exec(client *ClientV1, reader *bufio.Reader, params []string) ([]byte, error) {
-	fmt.Println(params)
 	switch params[0] {
 	case "PING": //心跳
 		return p.PING(client, params)
 	case "IDENTIFY": //身份认证
 		return p.IDENTIFY(client, reader, params[1:])
-	case "REGISTER":
+	case "REGISTER": //新增topic或channel
 		return p.REGISTER(client, reader, params[1:])
-	case "UNREGISTER":
+	case "UNREGISTER":	//删除topic或channel
 		return p.UNREGISTER(client, reader, params[1:])
 	}
 	return nil, protocol.NewFatalClientErr(nil, "E_INVALID", fmt.Sprintf("invalid command %s", params[0]))
@@ -199,9 +202,11 @@ func (p *LookupProtocolV1) UNREGISTER(client *ClientV1, reader *bufio.Reader, pa
 	return []byte("OK"), nil
 }
 
-//身份认证，在nsqd启动时，
-// 例如 go run main.go options.go -lookupd-tcp-address=127.0.0.1:4160
-// nsqd会向nsqlookupd发送IDENTIFY命令进行信息交换
+/**
+	身份认证，在nsqd启动时，
+	例如 go run main.go options.go -lookupd-tcp-address=127.0.0.1:4160
+	nsqd会向nsqlookupd发送IDENTIFY命令进行信息交换
+ */
 func (p *LookupProtocolV1) IDENTIFY(client *ClientV1, reader *bufio.Reader, params []string) ([]byte, error) {
 
 	var err error
@@ -211,14 +216,13 @@ func (p *LookupProtocolV1) IDENTIFY(client *ClientV1, reader *bufio.Reader, para
 	}
 
 	var bodyLen int32
-	//获取body有多少字节
-	//Big Endian 是指低地址端 存放 高位字节 客户端把长度这个字段以Big Endian传了
+	//获取body长度 BigEndian读取 (BigEndian指按照从低地址到高地址的顺序存放数据的高位字节到低位字节)
 	err = binary.Read(reader, binary.BigEndian, &bodyLen)
 
 	if err != nil {
 		return nil, protocol.NewFatalClientErr(err, "E_BAD_BODY", "IDENTIFY failed to read body size")
 	}
-	//根据body字节数一次性读取
+	//读取body
 	body := make([]byte, bodyLen)
 	_, err = io.ReadFull(reader, body)
 	if err != nil {
@@ -228,7 +232,7 @@ func (p *LookupProtocolV1) IDENTIFY(client *ClientV1, reader *bufio.Reader, para
 	// body is a json structure with producer information
 	peerInfo := PeerInfo{id: client.RemoteAddr().String()}
 	/**
-		body其实是一个JSON，于是乎解析到PeerInfo
+		body是一个JSON，解析到PeerInfo
 		结构体大概是存的信息
 		{
 			lastUpdate:0
@@ -252,19 +256,20 @@ func (p *LookupProtocolV1) IDENTIFY(client *ClientV1, reader *bufio.Reader, para
 		return nil, protocol.NewFatalClientErr(nil, "E_BAD_BODY", "IDENTIFY missing fields")
 	}
 
-	//这里会更新lastUpdate，不太懂这里为什么需要原子操作
+	//更新lastUpdate
 	atomic.StoreInt64(&peerInfo.lastUpdate, time.Now().UnixNano())
 
 	p.ctx.nsqlookupd.logf(LOG_INFO, "CLIENT(%s): IDENTIFY Address:%s TCP:%d HTTP:%d Version:%s",
 		client, peerInfo.BroadcastAddress, peerInfo.TCPPort, peerInfo.HTTPPort, peerInfo.Version)
 
+	//这里会赋值给client，录入客户端的身份信息致nsqlookupd的注册池里
 	client.peerInfo = &peerInfo
 	if p.ctx.nsqlookupd.DB.AddProducer(Registration{"client", "", ""}, &Producer{peerInfo: client.peerInfo}) {
 		p.ctx.nsqlookupd.logf(LOG_INFO, "DB: client(%s) REGISTER category:%s key:%s subkey:%s", client, "client", "", "")
 	}
 
 	// build a response
-	//组装响应参数，最后以json返回
+	//组装响应参数，JSON形式
 	data := make(map[string]interface{})
 	data["tcp_port"] = p.ctx.nsqlookupd.RealTCPAddr().Port
 	data["http_port"] = p.ctx.nsqlookupd.RealHTTPAddr().Port
@@ -284,15 +289,20 @@ func (p *LookupProtocolV1) IDENTIFY(client *ClientV1, reader *bufio.Reader, para
 	return response, nil
 }
 
+/**
+	心跳命令，默认情况下，nsqd会每约15秒发送PING至nsqlookupd,
+	（如果nsqd没收到返回，目前也就是日志报下错，没啥特殊处理)
+ */
 func (p *LookupProtocolV1) PING(client *ClientV1, params []string) ([]byte, error) {
+	//有身份信息的情况下，需要作lastUpdate的更新
 	if client.peerInfo != nil {
 		// we could get a PING before other commands on the same client connection
 		cur := time.Unix(0, atomic.LoadInt64(&client.peerInfo.lastUpdate))
 		now := time.Now()
 		p.ctx.nsqlookupd.logf(LOG_INFO, "CLIENT(%s): pinged (last ping %s)", client.peerInfo.id,
 			now.Sub(cur))
-		//更新时间
 		atomic.StoreInt64(&client.peerInfo.lastUpdate, now.UnixNano())
 	}
+	//返回OK
 	return []byte("OK"), nil
 }

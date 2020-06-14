@@ -18,7 +18,7 @@ type NSQLookupd struct {
 	opts         *Options //配置参数
 	tcpListener  net.Listener
 	httpListener net.Listener
-	tcpServer    *tcpServer
+	tcpServer    *tcpServer //tcp服务
 	waitGroup    util.WaitGroupWrapper
 	DB           *RegistrationDB //注册DB
 }
@@ -31,7 +31,6 @@ func New(opts *Options) (*NSQLookupd, error) {
 		opts.Logger = log.New(os.Stderr, opts.LogPrefix, log.Ldate|log.Ltime|log.Lmicroseconds)
 	}
 
-	//实例化
 	l := &NSQLookupd{
 		opts: opts,
 		DB:   NewRegistrationDB(),
@@ -75,9 +74,11 @@ func (l *NSQLookupd) Main() error {
 	//tcp服务
 	l.tcpServer = &tcpServer{ctx: ctx}
 
-	//Wrap会创建一个协程，
-	//创建的协程执行exitFunc(protocol.TCPServer(l.tcpListener, l.tcpServer, l.logf)),会阻塞，等到产生err则返回
-	//此时则执行 exitFunc(err) 会发送err至exitCh,下文的channel读取则取消堵塞
+	/**
+		Wrap会创建一个协程，
+		创建的协程执行exitFunc(protocol.TCPServer(l.tcpListener, l.tcpServer, l.logf)),阻塞至产生err
+		此时执行 exitFunc(err) 会发送err至exitCh
+	 */
 	l.waitGroup.Wrap(func() {
 		exitFunc(protocol.TCPServer(l.tcpListener, l.tcpServer, l.logf))
 	})

@@ -39,7 +39,6 @@ type Producer struct {
 
 type Producers []*Producer
 
-//生产者map
 type ProducerMap map[string]*Producer
 
 func (p *Producer) String() string {
@@ -73,6 +72,7 @@ func (r *RegistrationDB) AddRegistration(k Registration) {
 }
 
 // add a producer to a registration
+//录入客户端的身份信息
 func (r *RegistrationDB) AddProducer(k Registration, p *Producer) bool {
 	r.Lock()
 	defer r.Unlock()
@@ -162,6 +162,7 @@ func (r *RegistrationDB) FindProducers(category string, key string, subkey strin
 	return retProducers
 }
 
+//查询该客户端ID是否在注册DB里
 func (r *RegistrationDB) LookupRegistrations(id string) Registrations {
 	r.RLock()
 	defer r.RUnlock()

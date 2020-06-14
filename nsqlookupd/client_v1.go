@@ -5,8 +5,8 @@ import (
 )
 
 type ClientV1 struct {
-	net.Conn
-	peerInfo *PeerInfo
+	net.Conn //连接资源
+	peerInfo *PeerInfo //身份信息
 }
 
 func NewClientV1(conn net.Conn) *ClientV1 {

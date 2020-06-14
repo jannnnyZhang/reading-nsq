@@ -20,10 +20,10 @@ func (p *tcpServer) Handle(clientConn net.Conn) {
 	// The client should initialize itself by sending a 4 byte sequence indicating
 	// the version of the protocol that it intends to communicate, this will allow us
 	// to gracefully upgrade the protocol away from text/line oriented to whatever...
-	//这个是读协议类型，通信时前4个Byte表明协议类型
+	//前4个Byte存的是协议类型
 	buf := make([]byte, 4)
 	_, err := io.ReadFull(clientConn, buf)
-	//如果没读到 则报错
+
 	if err != nil {
 		p.ctx.nsqlookupd.logf(LOG_ERROR, "failed to read protocol version - %s", err)
 		clientConn.Close()
@@ -35,7 +35,7 @@ func (p *tcpServer) Handle(clientConn net.Conn) {
 		clientConn.RemoteAddr(), protocolMagic)
 
 	var prot protocol.Protocol
-	//目前只有  V1 协议类型
+	//只接受  V1协议
 	switch protocolMagic {
 	case "  V1":
 		prot = &LookupProtocolV1{ctx: p.ctx}
@@ -46,16 +46,15 @@ func (p *tcpServer) Handle(clientConn net.Conn) {
 			clientConn.RemoteAddr(), protocolMagic)
 		return
 	}
-	//把连接信息储存
-	//sync.Map可以保证并发安全
+	//存储连接信息,sync.Map可以保证并发安全
 	p.conns.Store(clientConn.RemoteAddr(), clientConn)
-	//循环，这个是真正的处理逻辑
+	//IO处理，各种命令在这里处理，阻塞
 	err = prot.IOLoop(clientConn)
 
 	if err != nil {
 		p.ctx.nsqlookupd.logf(LOG_ERROR, "client(%s) - %s", clientConn.RemoteAddr(), err)
 	}
-	//连接断开，需要删除对应连接信息
+	//删除对应连接信息
 	p.conns.Delete(clientConn.RemoteAddr())
 }
 
