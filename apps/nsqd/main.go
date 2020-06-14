@@ -18,7 +18,10 @@ import (
 	"github.com/nsqio/nsq/nsqd"
 )
 
-//如果是源码运行 go run main.go options.go
+/**
+	nsqd入口文件，程序结构上和nsqlookupd的入口文件非常相似,
+	也是用了svc包，详细的可以看下nsqlookupd/main.go
+ */
 type program struct {
 	once sync.Once
 	nsqd *nsqd.NSQD
@@ -89,7 +92,7 @@ func (p *program) Start() error {
 	}
 
 	go func() {
-		//主逻辑
+		//主逻辑,阻塞
 		err := p.nsqd.Main()
 		if err != nil {
 			//调stop方法

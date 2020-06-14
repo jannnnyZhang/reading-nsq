@@ -41,8 +41,8 @@ type Channel struct {
 
 	sync.RWMutex
 
-	topicName string
-	name      string
+	topicName string //属于的topic名称
+	name      string  //名称
 	ctx       *context
 
 	backend BackendQueue
@@ -78,7 +78,7 @@ func NewChannel(topicName string, channelName string, ctx *context,
 		topicName:      topicName,
 		name:           channelName,
 		memoryMsgChan:  nil, //内存消息通道
-		clients:        make(map[int64]Consumer), //关联消费者消费者
+		clients:        make(map[int64]Consumer), //关联消费者客户端
 		deleteCallback: deleteCallback, //删除回调方法
 		ctx:            ctx, //上下文，nsqd指针
 	}

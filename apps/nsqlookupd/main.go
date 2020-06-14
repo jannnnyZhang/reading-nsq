@@ -16,8 +16,16 @@ import (
 	"github.com/nsqio/nsq/nsqlookupd"
 )
 
+/**
+	nsqlookupd入口文件
+	go run main.go
+ */
 func nsqlookupdFlagSet(opts *nsqlookupd.Options) *flag.FlagSet {
-	//实例化一个集合
+	/**
+		flagSet主要是用于命令行参数的读取
+		例如 go run main.go --tcp-address=1270.0.0.1:5050
+		如果不加--tcp-address,那么会采用默认的配置，默认配置在 nsqlookupd\options.go
+	*/
 	flagSet := flag.NewFlagSet("nsqlookupd", flag.ExitOnError)
 
 	flagSet.String("config", "", "path to config file")
@@ -46,15 +54,15 @@ type program struct {
 func main() {
 	prg := &program{}
 	//用了svc包，Run启动，
-	//首先会调Init，再调Start, Start是启动核心，Init做一些初始化
-	//发送SIGINT，SIGTERM信号会回调Stop方法
+	//首先会调Init，再调Start, Start是启动核心（Start不允许阻塞），Init做一些初始化
+	//发送SIGINT（Ctrl+C默认发送SIGINT），SIGTERM信号会回调Stop方法
 	if err := svc.Run(prg, syscall.SIGINT, syscall.SIGTERM); err != nil {
 		logFatal("%s", err)
 	}
 }
 
 func (p *program) Init(env svc.Environment) error {
-	//这个判断是否有必要？svc源码已经做了相应判断
+	//这个判断是否有必要？svc包已经做了相应判断
 	if env.IsWindowsService() {
 		dir := filepath.Dir(os.Args[0])
 		return os.Chdir(dir)
@@ -63,21 +71,21 @@ func (p *program) Init(env svc.Environment) error {
 }
 
 func (p *program) Start() error {
-	//获取默认配置
+	//获取默认配置,并解析至flagSet
 	opts := nsqlookupd.NewOptions()
 
 	flagSet := nsqlookupdFlagSet(opts)
-	//解析除了第一个参数
+	//解析除第一个参数（第一个参数是程序文件名）
 	flagSet.Parse(os.Args[1:])
 
-	//获取是否参数有version，如果有则输入nsqd版本号
+	//如果参数有version，输出nsqd版本号
 	if flagSet.Lookup("version").Value.(flag.Getter).Get().(bool) {
 		fmt.Println(version.String("nsqlookupd"))
 		os.Exit(0)
 	}
 
 	var cfg map[string]interface{}
-	//如果有指定配置文件，则会读取配置配置文件
+	//有指定配置文件，则解析配置文件
 	configFile := flagSet.Lookup("config").Value.String()
 	if configFile != "" {
 		_, err := toml.DecodeFile(configFile, &cfg)
@@ -104,10 +112,10 @@ func (p *program) Start() error {
 
 	//由于start不能够被阻塞，所以这里需要开一个协程
 	go func() {
-		//nsqlookupd主逻辑，阻塞
+		//nsqlookupd主逻辑，阻塞运行
 		err := p.nsqlookupd.Main()
-		//如果有err,则执行stop方法,并且终止
 		if err != nil {
+			//执行stop方法，关闭连接等一系列结束动作
 			p.Stop()
 			//退出
 			os.Exit(1)
@@ -127,5 +135,6 @@ func (p *program) Stop() error {
 
 //错误打印
 func logFatal(f string, args ...interface{}) {
+	//这里是调用lg这个日志包
 	lg.LogFatal("[nsqlookupd] ", f, args...)
 }

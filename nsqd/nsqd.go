@@ -333,6 +333,12 @@ func writeSyncFile(fn string, data []byte) error {
 
 //加载元数据
 func (n *NSQD) LoadMetadata() error {
+	/**
+		这里有个原子操作，作并发安全，
+		q:这个方法不是只有刚启动的时候调的吗，为啥有并发呢？
+		a:从目前程序看确实好像是这样，但我的理解是，作为一个对外方法，设计时应该考虑其独立性，不应该去关心或者依赖调用方,
+	      这样也是方便扩展和维护
+	 */
 	atomic.StoreInt32(&n.isLoading, 1)
 	defer atomic.StoreInt32(&n.isLoading, 0)
 	//从nsqd.dat获取
@@ -347,13 +353,14 @@ func (n *NSQD) LoadMetadata() error {
 	}
 
 	var m meta
-	//解析
+	//解析json，文件里存的是json字符串
 	err = json.Unmarshal(data, &m)
 	if err != nil {
 		return fmt.Errorf("failed to parse metadata in %s - %s", fn, err)
 	}
 
 	for _, t := range m.Topics {
+		//判断topic名称是否合法
 		if !protocol.IsValidTopicName(t.Name) {
 			n.logf(LOG_WARN, "skipping creation of invalid topic %s", t.Name)
 			continue
@@ -361,16 +368,20 @@ func (n *NSQD) LoadMetadata() error {
 		//初始化topic
 		topic := n.GetTopic(t.Name)
 		if t.Paused {
+			//暂停
 			topic.Pause()
 		}
 		//初始化topic下的channel
 		for _, c := range t.Channels {
+			//判断channel名称是否合法
 			if !protocol.IsValidChannelName(c.Name) {
 				n.logf(LOG_WARN, "skipping creation of invalid channel %s", c.Name)
 				continue
 			}
+			//初始化channel
 			channel := topic.GetChannel(c.Name)
 			if c.Paused {
+				//暂停
 				channel.Pause()
 			}
 		}
