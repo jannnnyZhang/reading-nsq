@@ -84,7 +84,7 @@ func New(opts *Options) (*NSQD, error) {
 	var err error
 
 	dataPath := opts.DataPath
-	if opts.DataPath == "" {
+	if opts.DataPath == "" { //如果没有dataPath就默认当前目录
 		cwd, _ := os.Getwd()
 		dataPath = cwd
 	}

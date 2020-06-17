@@ -1,4 +1,5 @@
 #!/bin/bash
+#构建测试脚本
 readonly messageSize="${1:-200}"
 readonly batchSize="${2:-200}"
 readonly memQueueSize="${3:-1000000}"
